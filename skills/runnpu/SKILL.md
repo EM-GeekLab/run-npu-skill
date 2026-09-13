@@ -230,4 +230,4 @@ runnpu project quota set asr --pool ascend910b4=8,4 --storage-pool shared-cephfs
 4. 不猜状态含义：以 `status`、`reason.text`、`events` 为准；`metrics.available=false` 按"未接入"转述。
 5. 结果给出用户能直接用的关键字段（名字、状态、入口 URL / nodePort、原因）；数字带单位与口径（卡 / 卡当量 / GiB）。
 
-<!-- runnpu-skill v0.1.0-rc.1：与 runnpu CLI 同版本发布，`runnpu --version` 应一致 -->
+<!-- runnpu-skill v0.1.0：与 runnpu CLI 同版本发布，`runnpu --version` 应一致 -->

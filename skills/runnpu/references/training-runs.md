@@ -1,45 +1,51 @@
-# 训练/实验类任务经验（本地工程 → 集群跑通 → 盯指标）
+# 训练类负载的平台侧事实（RunNPU / 昇腾）
 
-用户丢来一个训练工程（文件夹/仓库）说「帮我跑起来」时的常规判断，按序：
+> 训练**方法论**（跑通链路的纪律、看曲线诊断、自动超参研究、长程与并行）不在本文件——
+> 见 `training-research` skill（训练模式会话里可用）。本文件只放**换个平台就作废**的事实：
+> 这个平台怎么传文件、这套镜像有什么炸点、这个集群实测过什么。
 
-## 0. 先读工程自述，再动平台
+## 1. 工程进集群（本平台的通道）
 
-工程里的 README / CLAUDE.md / requirements.txt 是第一信息源——入口脚本、超参环境变量、
-数据与权重是否已内置、框架适配是否做过，**工程说了的不要自己猜**。然后按 SKILL.md
-「创建负载前」流程查模板（训练类通常有预置的 torch-npu 模板，LD 救援 env 已内置）。
-
-## 1. 工程搬运（本地 → 容器）
-
-- **首选 SSH/SFTP**：负载加 `--ssh` 即可，**与安全级无关**（run-npu#595 起 restricted 也支持；
-  SSH 会话身份继承容器主进程，传上去的文件属主与容器内进程一致）。连接参数
-  别自己拼——`runnpu workload endpoints <p>/<n>` 给出拼好的命令，结构化值（脚本用）在
-  `runnpu workload get <p>/<n> -o json` 的 `.ssh.{username,host,port}`：登录用户名固定是
-  `<负载名>.<命名空间>`（SSHPiper 路由标识，
-  注意命名空间带 `proj-` 前缀，不是项目 slug 本身，更不是平台用户名），如
-  `scp -P 32222 -r ./工程 job1.proj-main@<入口IP>:/workspace/`；平台 SFTP 已验证可用。
-  能力边界：exec / 交互 shell / sftp / 本地转发 `-L`/`-D` 都支持，**远端监听 `-R` 未实现**。
+- **先起一个带 SSH 的训练环境**。SSH 与安全级、与 root **无关**（helper 是注入的原生二进制，
+  PID 1 非 root 时保持当前身份；run-npu#595 起 restricted 也支持，旧版 operator 才会以
+  `SshRootInitUnavailable` 拒绝）——`restricted` 下照样能开，**不要为了拿 SSH 把负载降到 baseline**。
+  SSH 会话身份继承容器主进程，传上去的文件属主与容器内进程一致。
+  root 镜像在 restricted 下要 `--run-as-uid`，那是安全级自身的要求，别和 SSH 绑一起。
+- ⚠️ **torch-npu 官方镜像做 training-env 必须带 `--arg sleep --arg infinity`**（平台已知问题：
+  该镜像 entrypoint 无命令时空参立退，PID 1 数秒退出 → 容器每 1-2 分钟重启，SSH 只在残存窗口
+  时好时坏，极易误判成网络/平台故障）。用 args、**不要用 `--command`**——保留 entrypoint 的
+  CANN 环境装配，SSH helper 的 env 快照才有内容。training-job 有真实训练命令，不受此影响。
+- 手工上传路径（无 `training_upload` 工具时，如算力管理模式）：连接参数**别自己拼**——
+  `runnpu workload endpoints <p>/<n>` 给出拼好的命令，结构化值（脚本用）在
+  `runnpu workload get <p>/<n> -o json` 的 `.ssh.{username,host,port}`。登录用户名固定是
+  `<负载名>.<命名空间>`（SSHPiper 路由标识；注意命名空间带 `proj-` 前缀，不是项目 slug 本身，
+  更不是平台用户名），如 `scp -P 32222 -r ./工程 job1.proj-main@<入口IP>:/workspace/`；
+  平台 SFTP 已验证可用。能力边界：exec / 交互 shell / sftp / 本地转发 `-L`/`-D` 都支持，
+  **远端监听 `-R` 未实现**。
 - 备选 exec 管道（无 SSH 时）：`tar czf - . | runnpu workload exec <p>/<n>` 里接
-  `tar xzf - -C /workspace`（stdin 必须以 `exit` 结尾）。
-- 数据集大（GB 级）就别跟着代码反复传：数据进数据卷 / 工作盘一次，代码单独同步。
+  `tar xzf - -C /workspace`（stdin 必须以 `exit` 结尾）；只传代码，数据集级流量不过控制面。
+- 数据集进数据卷 / 工作盘（`--mount` / `--workspace-gib`），一次落盘、代码单独同步。
 
-## 2. 运行
+## 2. 容器内运行（本部署实测）
 
 - 依赖安装走平台注入的 pip 镜像（负载 env 里已有）；装 opencv 报 libGL 缺失 →
   改 `opencv-python-headless`，不要 apt 补一堆图形库。
-- **长训练必须放后台**：`nohup python train.py > train.log 2>&1 &`——exec/SSH 会话断开
-  不能连累训练进程。
-- **密钥注入原则**（SwanLab / W&B / S3 等）：创建负载时用 `--env KEY=...` 注入，值取自
-  用户本地环境；**绝不**写进工程文件、不落盘、不在命令输出里回显。
+- **pip 装到 `--target /workspace/pylibs`** 并 `export PYTHONPATH=/workspace/pylibs`：
+  容器层随重启丢失，/workspace 工作盘持久——否则重启一次就要重装一遍。
+- 本集群到 PyPI 的出口带宽实测只有几十 KiB/s：大依赖预置进数据卷/工作盘。
+- 平台日志通道：`runnpu workload logs <p>/<n> --tail`（监控双信号源里的信号源 B）。
 
-## 3. 监控与健康判断（双信号源）
+## 3. 两个"看起来成功了"的假象（本平台实测踩过，2026-09-02）
 
-- 信号源 A：实验跟踪平台（SwanLab / W&B…）——在**本地**用同一个 key 经其 OpenAPI 拉指标
-  （如 SwanLab 的 `swanlab.OpenApi` 实验指标接口），不用进容器。
-- 信号源 B：`runnpu workload logs <p>/<n> --tail`——框架逐 epoch 的表格输出，A 断了用 B 兜底。
-- 经验口径：loss 前几个 epoch 应明显下降；**NaN / 持续不降** → 停下检查 lr 与数据，别硬等；
-  **长时间无输出** ≠ 卡死——NPU 首个 step 在编译算子，几分钟是正常的，logs 里有周期性输出即健康。
-- 自动化闭环模式（用户要「自动训练」时）：起训练 → 定期拉 loss → 收敛平台期或发散则停止、
-  调参（lr / epochs）、换 `RUN_NAME` 重跑一轮；每轮都要能在跟踪平台上按名字区分。
+- **job 秒级 completed + 跟踪平台无 run**：大概率是**覆盖了镜像 entrypoint**
+  （`--command bash -c …`）丢掉 CANN 环境装配 → torch_npu 不可用 → 设备探测降级 CPU
+  秒跑完、PYTHONPATH 也可能没带上。提交 training-job 时**保留 entrypoint、用 args 传命令**
+  （与 training-env 的 sleep infinity 同一个原理）；手动按模板 payload 拼 job 时，
+  模板里的 `LD_LIBRARY_PATH` 救援 env 必须原样带上。正常 NPU 训练首个 step 要编译算子
+  （分钟级），秒级完成先怀疑设备降级，别急着重提。
+- **卡够 ≠ 调度得上**：`CardInsufficientMemory` 事件 + 有空闲卡数，通常是**分卡（vNPU）碎片化**
+  ——平台外 Pod 按显存切片占卡，凑不出整卡。查逐卡占用（node metrics / overview 逐卡网格），
+  必要时先停自己占整卡的 env 给 job 让路（先 job 后 env，反过来 env 会把唯一整卡占住）。
 
 ## 4. 昇腾特有炸点（详见 troubleshooting.md「镜像兼容性」）
 
