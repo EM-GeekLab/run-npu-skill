@@ -44,6 +44,10 @@ ModelScope 技能中心：`modelscope skills add @<owner>/runnpu`（条目地址
 
 离线交付的集群到不了 GitHub：控制台自身提供与其版本一致的安装包，以那份为准。
 
+## 许可
+
+CLI 二进制与 Skill 内容均以 [Apache-2.0](LICENSE) 发布。
+
 ## 登录
 
 ```bash
