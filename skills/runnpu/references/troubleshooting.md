@@ -47,6 +47,11 @@ CANN `libruntime.so` 和与宿主驱动一致的 dsmi/hal 链。已知结论：
 
 - 工具 `url` 只在 ready 且有权限时返回；`internal_url` 是集群内地址（浏览器打不开）。
 - `node_port` 是**分配观测**：不含节点地址、不代表可达、可能在 ready=false 时就有。访问 = `http://<任一节点IP>:<node_port>`。
+- `http_port` 只出现在 `expose=httpPort` 的工具上（无泛域名现场的 Jupyter / code-server）：同样是分配观测，
+  可打开的地址看 `url`。它后面是 Pod 内的鉴权代理，**只认浏览器里的平台登录 Cookie**：`curl` 得到登录引导页是
+  正常的；用户说「打开是请先登录」→ 让他确认是在已登录控制台的同一浏览器、用与控制台相同的主机地址打开的
+  （换一个节点 IP / 换成域名都会让浏览器不带 Cookie）。负载被拒且 reason 是 `HttpAuthProxy*` → 平台侧
+  Operator 没配鉴权代理，是管理员的事，不是用户配置问题。
 - **nodePort 工具的 ready 有已知误报**（run-npu#553：EndpointUnavailable 但实际可达）：
   Pod Running 后直接 `curl --max-time 5 http://<节点IP>:<node_port>/` 实测，别等 ready。
 

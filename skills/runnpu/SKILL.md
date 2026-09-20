@@ -154,10 +154,15 @@ runnpu workload get main/svc1        # 工具行显示 nodePort=3xxxx；访问 h
 runnpu workload endpoints main/svc1     # 一条命令给出所有入口 + 现在能不能用
 ```
 
-三条路径，按可用性排：
+几条路径，按可用性排：
 
 1. **泛域名入口**（`--jupyter` / `--code-server` / `--port …,expose=externalUrl`）：`url` 非空即可点，
    平台登录态直达，不用再输 token；
+   - **没有泛域名的现场**（离线机房，控制台本身就是 `http://<IP>:30000`）：`--jupyter` / `--code-server` 会被平台
+     自动建成 `expose=httpPort`，`url` 形如 `http://<IP>:3xxxx/`。走哪条由平台决定，创建命令不用变。
+     ⚠️ 这个地址靠**浏览器里的平台登录 Cookie** 放行：只能让用户在**已登录控制台的同一个浏览器**里、
+     用与控制台**相同的主机地址**打开。**你（Agent）自己 `curl` 它只会拿到「请先登录」页**——不代表服务没起来；
+     要程序化访问（检查 Jupyter API 等）用下面的端口转发；
 2. **NodePort**（`--port name:端口,expose=nodePort`）：`endpoints` 会给出 `http://<节点地址>:<端口>` 直接访问。
    ⚠️ **`workload get` 里这条的 `ready` 会长期是 false**——Operator 只认节点 ExternalIP，私有化集群没有
    （上游 run-npu#553）。端口是真的通的，**别因为 ready=false 就告诉用户"没起来"**，以 `endpoints` 的判断为准；
@@ -230,4 +235,4 @@ runnpu project quota set asr --pool ascend910b4=8,4 --storage-pool shared-cephfs
 4. 不猜状态含义：以 `status`、`reason.text`、`events` 为准；`metrics.available=false` 按"未接入"转述。
 5. 结果给出用户能直接用的关键字段（名字、状态、入口 URL / nodePort、原因）；数字带单位与口径（卡 / 卡当量 / GiB）。
 
-<!-- runnpu-skill v0.1.1：与 runnpu CLI 同版本发布，`runnpu --version` 应一致 -->
+<!-- runnpu-skill v0.1.2：与 runnpu CLI 同版本发布，`runnpu --version` 应一致 -->
